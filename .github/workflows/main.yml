@@ -1,0 +1,151 @@
+name: Fetch Google Calendar
+
+on:
+  schedule:
+    - cron: "0 12 * * *"
+  workflow_dispatch: 
+
+permissions:
+  contents: write 
+
+concurrency:
+  group: fetch-calendar
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Haal agenda op en bouw calendar.json (datum + status)
+        env:
+          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          GOOGLE_CALENDAR_ID="$(printf '%s' "$GOOGLE_CALENDAR_ID" | tr -d '[:space:]')"
+          GOOGLE_CLIENT_ID="$(printf '%s' "$GOOGLE_CLIENT_ID" | tr -d '[:space:]')"
+          GOOGLE_CLIENT_SECRET="$(printf '%s' "$GOOGLE_CLIENT_SECRET" | tr -d '[:space:]')"
+          GOOGLE_REFRESH_TOKEN="$(printf '%s' "$GOOGLE_REFRESH_TOKEN" | tr -d '[:space:]')"
+
+          if ! curl --silent --show-error --fail-with-body -X POST \
+              https://oauth2.googleapis.com/token \
+              --data-urlencode "client_id=${GOOGLE_CLIENT_ID}" \
+              --data-urlencode "client_secret=${GOOGLE_CLIENT_SECRET}" \
+              --data-urlencode "refresh_token=${GOOGLE_REFRESH_TOKEN}" \
+              --data-urlencode "grant_type=refresh_token" \
+              --output token.tmp.json; then
+            echo "Inloggen mislukt. Antwoord van Google:"
+            cat token.tmp.json
+            rm -f token.tmp.json
+            exit 1
+          fi
+          ACCESS_TOKEN="$(jq -r '.access_token' token.tmp.json)"
+          rm -f token.tmp.json
+          echo "::add-mask::${ACCESS_TOKEN}"
+          AUTH=(--header "Authorization: Bearer ${ACCESS_TOKEN}")
+
+          CAL_URL="https://www.googleapis.com/calendar/v3/calendars/$(printf '%s' "$GOOGLE_CALENDAR_ID" | jq -sRr @uri)"
+          
+          TIME_MAX="$(date -u -d '+5 years' +%Y-%m-%dT00:00:00Z)"
+
+          : > items.ndjson
+          PAGE_TOKEN=""
+          while :; do
+            ARGS=(
+              "${AUTH[@]}"
+              --data-urlencode "timeMax=${TIME_MAX}"
+              --data-urlencode "singleEvents=true"
+              --data-urlencode "orderBy=startTime"
+              --data-urlencode "maxResults=2500"
+              --data-urlencode "showDeleted=false"
+              --data-urlencode "eventLabelVersion=1"
+              --data-urlencode "fields=nextPageToken,items(start,end,status,eventLabelId)"
+            )
+            if [ -n "$PAGE_TOKEN" ]; then
+              ARGS+=(--data-urlencode "pageToken=${PAGE_TOKEN}")
+            fi
+
+            if ! curl --silent --show-error --fail-with-body --get "${CAL_URL}/events" "${ARGS[@]}" --output page.tmp.json; then
+              echo "Events ophalen mislukt. Antwoord van Google:"
+              cat page.tmp.json
+              rm -f page.tmp.json items.ndjson
+              exit 1
+            fi
+
+            jq -c '.items[]?' page.tmp.json >> items.ndjson
+            PAGE_TOKEN="$(jq -r '.nextPageToken // empty' page.tmp.json)"
+            rm -f page.tmp.json
+            [ -z "$PAGE_TOKEN" ] && break
+          done
+
+          if ! curl --silent --show-error --fail-with-body --get "$CAL_URL" \
+              "${AUTH[@]}" \
+              --data-urlencode "eventLabelVersion=1" \
+              --data-urlencode "fields=labelProperties" \
+              --output labels.tmp.json; then
+            echo "Labels ophalen mislukt. Antwoord van Google:"
+            cat labels.tmp.json
+            rm -f labels.tmp.json items.ndjson
+            exit 1
+          fi
+          LABELS="$(jq -c '.labelProperties.eventLabels // []' labels.tmp.json)"
+          rm -f labels.tmp.json
+          
+          jq -s --argjson labels "$LABELS" '
+            def days($s; $e):   
+              (($s + "T00:00:00Z") | fromdateiso8601) as $a
+              | (($e + "T00:00:00Z") | fromdateiso8601) as $b
+              | [range($a; $b; 86400)] | map(strftime("%Y-%m-%d"));
+
+            def prio: if . == "Verhuurd" then 0 elif . == "Geen verhuur" then 1 else 2 end;
+
+            ["Verhuurd", "In optie", "Geen verhuur"] as $allowed
+            | [
+                .[]
+                | select(.status != "cancelled")
+                | . as $ev
+                | ([ $labels[] | select(.id == $ev.eventLabelId) | .name ] | first) as $status
+                | select($status != null and ($allowed | index($status)))
+                | (.start.date // .start.dateTime[0:10]) as $s
+                | (
+                    if .end.date then .end.date
+                    elif (.end.dateTime | test("T00:00:00")) then .end.dateTime[0:10]
+                    else ((((.end.dateTime[0:10] + "T00:00:00Z") | fromdateiso8601) + 86400) | strftime("%Y-%m-%d"))
+                    end
+                  ) as $e
+                | days($s; $e)[] as $d
+                | { date: $d, status: $status }
+              ]
+            | group_by(.date)
+            | map({ key: .[0].date, value: (min_by(.status | prio) | .status) })
+            | from_entries
+          ' items.ndjson > calendar.json
+
+          rm -f items.ndjson
+
+      - name: Commit en push als er iets veranderd is
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add calendar.json
+          if git diff --cached --quiet; then
+            echo "Geen wijzigingen, niets te committen."
+          else
+            git commit -m "Update calendar.json ($(date -u +%Y-%m-%d))"
+            for i in 1 2 3; do
+              git pull --rebase -X theirs origin "${GITHUB_REF_NAME}"
+              if git push; then
+                exit 0
+              fi
+              echo "Push mislukt, opnieuw proberen ($i/3)..."
+              sleep 5
+            done
+            echo "Push is na 3 pogingen niet gelukt."
+            exit 1
+          fi
