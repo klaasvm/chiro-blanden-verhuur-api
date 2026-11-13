@@ -3,10 +3,10 @@ name: Fetch Google Calendar
 on:
   schedule:
     - cron: "0 12 * * *"
-  workflow_dispatch:
+  workflow_dispatch: 
 
 permissions:
-  contents: write
+  contents: write 
 
 concurrency:
   group: fetch-calendar
@@ -51,7 +51,7 @@ jobs:
           AUTH=(--header "Authorization: Bearer ${ACCESS_TOKEN}")
 
           CAL_URL="https://www.googleapis.com/calendar/v3/calendars/$(printf '%s' "$GOOGLE_CALENDAR_ID" | jq -sRr @uri)"
-
+          
           TIME_MAX="$(date -u -d '+5 years' +%Y-%m-%dT00:00:00Z)"
 
           : > items.ndjson
@@ -98,7 +98,7 @@ jobs:
           rm -f labels.tmp.json
           
           jq -s --argjson labels "$LABELS" '
-            def days($s; $e):
+            def days($s; $e):   
               (($s + "T00:00:00Z") | fromdateiso8601) as $a
               | (($e + "T00:00:00Z") | fromdateiso8601) as $b
               | [range($a; $b; 86400)] | map(strftime("%Y-%m-%d"));
