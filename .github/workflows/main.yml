@@ -2,7 +2,7 @@ name: Fetch Google Calendar
 
 on:
   schedule:
-    - cron: "0 12 * * *"
+    - cron: "0 0,6,12,18 * * *"
   workflow_dispatch: 
 
 permissions:
@@ -52,6 +52,9 @@ jobs:
 
           CAL_URL="https://www.googleapis.com/calendar/v3/calendars/$(printf '%s' "$GOOGLE_CALENDAR_ID" | jq -sRr @uri)"
           
+          # Datums die meer dan 7 dagen voorbij zijn, komen niet meer in calendar.json
+          CUTOFF="$(date -u -d '-7 days' +%Y-%m-%d)"
+          TIME_MIN="${CUTOFF}T00:00:00Z"
           TIME_MAX="$(date -u -d '+5 years' +%Y-%m-%dT00:00:00Z)"
 
           : > items.ndjson
@@ -59,6 +62,7 @@ jobs:
           while :; do
             ARGS=(
               "${AUTH[@]}"
+              --data-urlencode "timeMin=${TIME_MIN}"
               --data-urlencode "timeMax=${TIME_MAX}"
               --data-urlencode "singleEvents=true"
               --data-urlencode "orderBy=startTime"
@@ -97,7 +101,7 @@ jobs:
           LABELS="$(jq -c '.labelProperties.eventLabels // []' labels.tmp.json)"
           rm -f labels.tmp.json
           
-          jq -s --argjson labels "$LABELS" '
+          jq -s --argjson labels "$LABELS" --arg cutoff "$CUTOFF" '
             def days($s; $e):   
               (($s + "T00:00:00Z") | fromdateiso8601) as $a
               | (($e + "T00:00:00Z") | fromdateiso8601) as $b
@@ -120,6 +124,7 @@ jobs:
                     end
                   ) as $e
                 | days($s; $e)[] as $d
+                | select($d >= $cutoff)
                 | { date: $d, status: $status }
               ]
             | group_by(.date)
