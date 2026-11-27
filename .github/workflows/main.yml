@@ -213,8 +213,8 @@ jobs:
             [ -z "$PAGE_TOKEN" ] && break
           done
 
-          # Resultaat: { "2026-11-29": [ { "title": "..." }, ... ], ... }
-          # Meerdaagse activiteiten (bv. kamp) staan op elke dag.
+          # Resultaat: { "2026-11-29": "Geen Chiro", "2027-07-15": "Kamp Keti / Kamp Tito & Rakwi", ... }
+          # Meerdaagse activiteiten (bv. kamp) staan op elke dag; meerdere op één dag worden met " / " samengevoegd.
           jq -s --arg cutoff "$CUTOFF" '
             def nextday: ((. + "T00:00:00Z") | fromdateiso8601 + 86400 | strftime("%Y-%m-%d"));
             def days($s; $e):
@@ -239,7 +239,7 @@ jobs:
               | { date: $d, title: $title }
             ]
             | group_by(.date)
-            | map({ key: .[0].date, value: map({ title }) })
+            | map({ key: .[0].date, value: (reduce (.[].title) as $t ([]; if any(.[]; . == $t) then . else . + [$t] end) | join(" / ")) })
             | from_entries
           ' items.ndjson > planning.json
 
