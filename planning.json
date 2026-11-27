@@ -1,153 +1,25 @@
 {
-  "2026-11-29": [
-    {
-      "title": "Geen Chiro - Laatste Van De Maand"
-    }
-  ],
-  "2026-12-06": [
-    {
-      "title": "Chiro - Sint - Vanaf Tito: avondactiviteit"
-    }
-  ],
-  "2026-12-13": [
-    {
-      "title": "Chiro - Vanaf Tito: avondactiviteit"
-    }
-  ],
-  "2026-12-20": [
-    {
-      "title": "Chiro"
-    }
-  ],
-  "2026-12-27": [
-    {
-      "title": "Geen Chiro"
-    }
-  ],
-  "2027-01-03": [
-    {
-      "title": "Geen Chiro"
-    }
-  ],
-  "2027-01-10": [
-    {
-      "title": "Chiro"
-    }
-  ],
-  "2027-01-17": [
-    {
-      "title": "Chiro"
-    }
-  ],
-  "2027-01-24": [
-    {
-      "title": "Chiro"
-    }
-  ],
-  "2027-01-31": [
-    {
-      "title": "Geen Chiro - Laatste Van De Maand"
-    }
-  ],
-  "2027-02-06": [
-    {
-      "title": "Groepsfeest"
-    }
-  ],
-  "2027-07-14": [
-    {
-      "title": "Kamp Keti"
-    }
-  ],
-  "2027-07-15": [
-    {
-      "title": "Kamp Keti"
-    },
-    {
-      "title": "Kamp Tito & Rakwi"
-    }
-  ],
-  "2027-07-16": [
-    {
-      "title": "Kamp Keti"
-    },
-    {
-      "title": "Kamp Tito & Rakwi"
-    }
-  ],
-  "2027-07-17": [
-    {
-      "title": "Kamp Keti"
-    },
-    {
-      "title": "Kamp Tito & Rakwi"
-    }
-  ],
-  "2027-07-18": [
-    {
-      "title": "Kamp Keti"
-    },
-    {
-      "title": "Kamp Tito & Rakwi"
-    },
-    {
-      "title": "Kamp Kiekeboes, Ogelijnen & Guiten"
-    }
-  ],
-  "2027-07-19": [
-    {
-      "title": "Kamp Keti"
-    },
-    {
-      "title": "Kamp Tito & Rakwi"
-    }
-  ],
-  "2027-07-20": [
-    {
-      "title": "Kamp Keti"
-    },
-    {
-      "title": "Kamp Tito & Rakwi"
-    }
-  ],
-  "2027-07-21": [
-    {
-      "title": "Kamp Keti"
-    },
-    {
-      "title": "Kamp Tito & Rakwi"
-    }
-  ],
-  "2027-07-22": [
-    {
-      "title": "Kamp Keti"
-    },
-    {
-      "title": "Kamp Tito & Rakwi"
-    }
-  ],
-  "2027-07-23": [
-    {
-      "title": "Kamp Keti"
-    },
-    {
-      "title": "Kamp Tito & Rakwi"
-    }
-  ],
-  "2027-07-24": [
-    {
-      "title": "Kamp Keti"
-    },
-    {
-      "title": "Kamp Tito & Rakwi"
-    }
-  ],
-  "2027-07-25": [
-    {
-      "title": "Kamp Keti"
-    },
-    {
-      "title": "Kamp Tito & Rakwi"
-    }
-  ]
+  "2026-11-29": "Geen Chiro - Laatste Van De Maand",
+  "2026-12-06": "Chiro - Sint - Vanaf Tito: avondactiviteit",
+  "2026-12-13": "Chiro - Vanaf Tito: avondactiviteit",
+  "2026-12-20": "Chiro",
+  "2026-12-27": "Geen Chiro",
+  "2027-01-03": "Geen Chiro",
+  "2027-01-10": "Chiro",
+  "2027-01-17": "Chiro",
+  "2027-01-24": "Chiro",
+  "2027-01-31": "Geen Chiro - Laatste Van De Maand",
+  "2027-02-06": "Groepsfeest",
+  "2027-07-14": "Kamp Keti",
+  "2027-07-15": "Kamp Keti / Kamp Tito & Rakwi",
+  "2027-07-16": "Kamp Keti / Kamp Tito & Rakwi",
+  "2027-07-17": "Kamp Keti / Kamp Tito & Rakwi",
+  "2027-07-18": "Kamp Keti / Kamp Tito & Rakwi / Kamp Kiekeboes, Ogelijnen & Guiten",
+  "2027-07-19": "Kamp Keti / Kamp Tito & Rakwi",
+  "2027-07-20": "Kamp Keti / Kamp Tito & Rakwi",
+  "2027-07-21": "Kamp Keti / Kamp Tito & Rakwi",
+  "2027-07-22": "Kamp Keti / Kamp Tito & Rakwi",
+  "2027-07-23": "Kamp Keti / Kamp Tito & Rakwi",
+  "2027-07-24": "Kamp Keti / Kamp Tito & Rakwi",
+  "2027-07-25": "Kamp Keti / Kamp Tito & Rakwi"
 }
