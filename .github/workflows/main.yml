@@ -1,27 +1,25 @@
-name: Fetch Google Calendar
+name: Fetch Google Calendars
 
 on:
   schedule:
     - cron: "0 0,6,12,18 * * *"
-  workflow_dispatch: 
+  workflow_dispatch:
 
 permissions:
-  contents: write 
+  contents: write
 
 concurrency:
   group: fetch-calendar
   cancel-in-progress: false
 
 jobs:
-  fetch:
+  # ───────────────────────────── VERHUUR ─────────────────────────────
+  verhuur:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Haal agenda op en bouw calendar.json (datum + status)
+      - name: Haal verhuur-agenda op en bouw verhuur.json (datum + status)
         env:
-          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID }}
+          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID_VERHUUR }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
@@ -51,8 +49,8 @@ jobs:
           AUTH=(--header "Authorization: Bearer ${ACCESS_TOKEN}")
 
           CAL_URL="https://www.googleapis.com/calendar/v3/calendars/$(printf '%s' "$GOOGLE_CALENDAR_ID" | jq -sRr @uri)"
-          
-          # Datums die meer dan 7 dagen voorbij zijn, komen niet meer in calendar.json
+
+          # Datums die meer dan 7 dagen voorbij zijn, komen niet meer in verhuur.json
           CUTOFF="$(date -u -d '-7 days' +%Y-%m-%d)"
           TIME_MIN="${CUTOFF}T00:00:00Z"
           TIME_MAX="$(date -u -d '+5 years' +%Y-%m-%dT00:00:00Z)"
@@ -68,6 +66,7 @@ jobs:
               --data-urlencode "orderBy=startTime"
               --data-urlencode "maxResults=2500"
               --data-urlencode "showDeleted=false"
+              --data-urlencode "timeZone=Europe/Brussels"
               --data-urlencode "eventLabelVersion=1"
               --data-urlencode "fields=nextPageToken,items(start,end,status,eventLabelId)"
             )
@@ -100,9 +99,9 @@ jobs:
           fi
           LABELS="$(jq -c '.labelProperties.eventLabels // []' labels.tmp.json)"
           rm -f labels.tmp.json
-          
+
           jq -s --argjson labels "$LABELS" --arg cutoff "$CUTOFF" '
-            def days($s; $e):   
+            def days($s; $e):
               (($s + "T00:00:00Z") | fromdateiso8601) as $a
               | (($e + "T00:00:00Z") | fromdateiso8601) as $b
               | [range($a; $b; 86400)] | map(strftime("%Y-%m-%d"));
@@ -130,27 +129,190 @@ jobs:
             | group_by(.date)
             | map({ key: .[0].date, value: (min_by(.status | prio) | .status) })
             | from_entries
-          ' items.ndjson > calendar.json
+          ' items.ndjson > verhuur.json
 
           rm -f items.ndjson
 
-      - name: Commit en push als er iets veranderd is
+      - name: Bewaar verhuur.json voor de commit-job
+        uses: actions/upload-artifact@v4
+        with:
+          name: verhuur-json
+          path: verhuur.json
+          retention-days: 1
+
+  # ───────────────────────────── PLANNING ────────────────────────────
+  planning:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Haal planning-agenda op en bouw planning.json (activiteiten per datum)
+        env:
+          GOOGLE_CALENDAR_ID: ${{ secrets.GOOGLE_CALENDAR_ID_PLANNING }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add calendar.json
-          if git diff --cached --quiet; then
-            echo "Geen wijzigingen, niets te committen."
-          else
-            git commit -m "Update calendar.json ($(date -u +%Y-%m-%d))"
-            for i in 1 2 3; do
-              git pull --rebase -X theirs origin "${GITHUB_REF_NAME}"
-              if git push; then
-                exit 0
-              fi
-              echo "Push mislukt, opnieuw proberen ($i/3)..."
-              sleep 5
-            done
-            echo "Push is na 3 pogingen niet gelukt."
+          set -euo pipefail
+
+          GOOGLE_CALENDAR_ID="$(printf '%s' "$GOOGLE_CALENDAR_ID" | tr -d '[:space:]')"
+          GOOGLE_CLIENT_ID="$(printf '%s' "$GOOGLE_CLIENT_ID" | tr -d '[:space:]')"
+          GOOGLE_CLIENT_SECRET="$(printf '%s' "$GOOGLE_CLIENT_SECRET" | tr -d '[:space:]')"
+          GOOGLE_REFRESH_TOKEN="$(printf '%s' "$GOOGLE_REFRESH_TOKEN" | tr -d '[:space:]')"
+
+          if ! curl --silent --show-error --fail-with-body -X POST \
+              https://oauth2.googleapis.com/token \
+              --data-urlencode "client_id=${GOOGLE_CLIENT_ID}" \
+              --data-urlencode "client_secret=${GOOGLE_CLIENT_SECRET}" \
+              --data-urlencode "refresh_token=${GOOGLE_REFRESH_TOKEN}" \
+              --data-urlencode "grant_type=refresh_token" \
+              --output token.tmp.json; then
+            echo "Inloggen mislukt. Antwoord van Google:"
+            cat token.tmp.json
+            rm -f token.tmp.json
             exit 1
           fi
+          ACCESS_TOKEN="$(jq -r '.access_token' token.tmp.json)"
+          rm -f token.tmp.json
+          echo "::add-mask::${ACCESS_TOKEN}"
+          AUTH=(--header "Authorization: Bearer ${ACCESS_TOKEN}")
+
+          CAL_URL="https://www.googleapis.com/calendar/v3/calendars/$(printf '%s' "$GOOGLE_CALENDAR_ID" | jq -sRr @uri)"
+
+          # Datums die meer dan 7 dagen voorbij zijn, komen niet meer in planning.json
+          CUTOFF="$(date -u -d '-7 days' +%Y-%m-%d)"
+          TIME_MIN="${CUTOFF}T00:00:00Z"
+          TIME_MAX="$(date -u -d '+5 years' +%Y-%m-%dT00:00:00Z)"
+
+          : > items.ndjson
+          PAGE_TOKEN=""
+          while :; do
+            ARGS=(
+              "${AUTH[@]}"
+              --data-urlencode "timeMin=${TIME_MIN}"
+              --data-urlencode "timeMax=${TIME_MAX}"
+              --data-urlencode "singleEvents=true"
+              --data-urlencode "orderBy=startTime"
+              --data-urlencode "maxResults=2500"
+              --data-urlencode "showDeleted=false"
+              --data-urlencode "timeZone=Europe/Brussels"
+              --data-urlencode "fields=nextPageToken,items(start,end,status,summary,location,description)"
+            )
+            if [ -n "$PAGE_TOKEN" ]; then
+              ARGS+=(--data-urlencode "pageToken=${PAGE_TOKEN}")
+            fi
+
+            if ! curl --silent --show-error --fail-with-body --get "${CAL_URL}/events" "${ARGS[@]}" --output page.tmp.json; then
+              echo "Events ophalen mislukt. Antwoord van Google:"
+              cat page.tmp.json
+              rm -f page.tmp.json items.ndjson
+              exit 1
+            fi
+
+            jq -c '.items[]?' page.tmp.json >> items.ndjson
+            PAGE_TOKEN="$(jq -r '.nextPageToken // empty' page.tmp.json)"
+            rm -f page.tmp.json
+            [ -z "$PAGE_TOKEN" ] && break
+          done
+
+          # Resultaat: { "2026-11-29": [ { title, allDay, start, end, location, description }, ... ], ... }
+          # start/end = "HH:MM" (Brusselse tijd), of null bij hele-dag-activiteiten.
+          # Meerdaagse activiteiten staan op elke dag; start alleen op de eerste dag, end alleen op de laatste.
+          jq -s --arg cutoff "$CUTOFF" '
+            def nextday: ((. + "T00:00:00Z") | fromdateiso8601 + 86400 | strftime("%Y-%m-%d"));
+            def days($s; $e):
+              (($s + "T00:00:00Z") | fromdateiso8601) as $a
+              | (($e + "T00:00:00Z") | fromdateiso8601) as $b
+              | [range($a; $b; 86400)] | map(strftime("%Y-%m-%d"));
+
+            [
+              .[]
+              | select(.status != "cancelled")
+              | (.start.date != null) as $allDay
+              | (.start.date // .start.dateTime[0:10]) as $s
+              | (
+                  if .end.date then .end.date
+                  elif (.end.dateTime[11:19] == "00:00:00") then .end.dateTime[0:10]
+                  else (.end.dateTime[0:10] | nextday)
+                  end
+                ) as $e0
+              | (if $e0 <= $s then ($s | nextday) else $e0 end) as $e
+              | days($s; $e) as $list
+              | . as $ev
+              | $list[] as $d
+              | select($d >= $cutoff)
+              | {
+                  date: $d,
+                  event: {
+                    title: ($ev.summary // ""),
+                    allDay: $allDay,
+                    start: (if $allDay or $d != $list[0]  then null else $ev.start.dateTime[11:16] end),
+                    end:   (if $allDay or $d != $list[-1] then null else $ev.end.dateTime[11:16] end),
+                    location: ($ev.location // null),
+                    description: ($ev.description // null)
+                  }
+                }
+            ]
+            | group_by(.date)
+            | map({ key: .[0].date, value: (map(.event) | sort_by((.allDay | not), (.start // ""))) })
+            | from_entries
+          ' items.ndjson > planning.json
+
+          rm -f items.ndjson
+
+      - name: Bewaar planning.json voor de commit-job
+        uses: actions/upload-artifact@v4
+        with:
+          name: planning-json
+          path: planning.json
+          retention-days: 1
+
+  # ───────────────────────────── COMMIT ──────────────────────────────
+  # Draait ook als één van de twee hierboven faalt: commit dan enkel wat wél gelukt is.
+  commit:
+    needs: [verhuur, planning]
+    if: ${{ !cancelled() && (needs.verhuur.result == 'success' || needs.planning.result == 'success') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download gelukte JSON-bestanden
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*-json"
+          merge-multiple: true
+          path: _out
+
+      - name: Commit en push als er iets veranderd is
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          CHANGED=()
+          for f in verhuur.json planning.json; do
+            if [ -f "_out/$f" ]; then
+              cp "_out/$f" "$f"
+              git add "$f"
+              CHANGED+=("$f")
+            else
+              echo "⚠️ $f ontbreekt (die job is mislukt) — oude versie blijft staan."
+            fi
+          done
+          rm -rf _out
+
+          if git diff --cached --quiet; then
+            echo "Geen wijzigingen, niets te committen."
+            exit 0
+          fi
+
+          git commit -m "Update ${CHANGED[*]} ($(date -u +%Y-%m-%d))"
+          for i in 1 2 3; do
+            git pull --rebase -X theirs origin "${GITHUB_REF_NAME}"
+            if git push; then
+              exit 0
+            fi
+            echo "Push mislukt, opnieuw proberen ($i/3)..."
+            sleep 5
+          done
+          echo "Push is na 3 pogingen niet gelukt."
+          exit 1
