@@ -194,7 +194,7 @@ jobs:
               --data-urlencode "maxResults=2500"
               --data-urlencode "showDeleted=false"
               --data-urlencode "timeZone=Europe/Brussels"
-              --data-urlencode "fields=nextPageToken,items(start,end,status,summary,location,description)"
+              --data-urlencode "fields=nextPageToken,items(start,end,status,summary)"
             )
             if [ -n "$PAGE_TOKEN" ]; then
               ARGS+=(--data-urlencode "pageToken=${PAGE_TOKEN}")
@@ -213,9 +213,8 @@ jobs:
             [ -z "$PAGE_TOKEN" ] && break
           done
 
-          # Resultaat: { "2026-11-29": [ { title, allDay, start, end, location, description }, ... ], ... }
-          # start/end = "HH:MM" (Brusselse tijd), of null bij hele-dag-activiteiten.
-          # Meerdaagse activiteiten staan op elke dag; start alleen op de eerste dag, end alleen op de laatste.
+          # Resultaat: { "2026-11-29": [ { "title": "..." }, ... ], ... }
+          # Meerdaagse activiteiten (bv. kamp) staan op elke dag.
           jq -s --arg cutoff "$CUTOFF" '
             def nextday: ((. + "T00:00:00Z") | fromdateiso8601 + 86400 | strftime("%Y-%m-%d"));
             def days($s; $e):
@@ -226,7 +225,6 @@ jobs:
             [
               .[]
               | select(.status != "cancelled")
-              | (.start.date != null) as $allDay
               | (.start.date // .start.dateTime[0:10]) as $s
               | (
                   if .end.date then .end.date
@@ -235,24 +233,13 @@ jobs:
                   end
                 ) as $e0
               | (if $e0 <= $s then ($s | nextday) else $e0 end) as $e
-              | days($s; $e) as $list
-              | . as $ev
-              | $list[] as $d
+              | (.summary // "") as $title
+              | days($s; $e)[] as $d
               | select($d >= $cutoff)
-              | {
-                  date: $d,
-                  event: {
-                    title: ($ev.summary // ""),
-                    allDay: $allDay,
-                    start: (if $allDay or $d != $list[0]  then null else $ev.start.dateTime[11:16] end),
-                    end:   (if $allDay or $d != $list[-1] then null else $ev.end.dateTime[11:16] end),
-                    location: ($ev.location // null),
-                    description: ($ev.description // null)
-                  }
-                }
+              | { date: $d, title: $title }
             ]
             | group_by(.date)
-            | map({ key: .[0].date, value: (map(.event) | sort_by((.allDay | not), (.start // ""))) })
+            | map({ key: .[0].date, value: map({ title }) })
             | from_entries
           ' items.ndjson > planning.json
 
